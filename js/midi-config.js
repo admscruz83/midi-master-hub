@@ -1,5 +1,5 @@
 /**
- * MIDI Config - Final com Monitor de Atividade
+ * MIDI Config - Ativação de Fluxo BLE
  */
 const MidiConfig = {
     renderDeviceList() {
@@ -8,19 +8,19 @@ const MidiConfig = {
 
         listContainer.innerHTML = `
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
-                <button class="action-btn" onclick="MidiConfig.scanBLE()" style="background:#2b3a55; border: 1px solid #4a6fa5; color:white; height:50px; border-radius:8px;">1. Parear Bluetooth</button>
+                <button class="action-btn" onclick="MidiConfig.scanBLE()" style="background:#2b3a55; border: 1px solid #4a6fa5; color:white; height:50px; border-radius:8px;">1. Conectar Bluetooth</button>
                 <button class="action-btn" onclick="MidiConfig.forceRebind()" style="background:#4CAF50; color:white; border:none; font-weight:bold; height:50px; border-radius:8px;">2. Atualizar Lista</button>
             </div>
             
             <div id="debug-console" style="font-size:11px; color:#4CAF50; background:#000; padding:12px; margin-bottom:15px; border-radius:8px; font-family:monospace; border:1px solid #333; min-height:60px;">
-                Aguardando sinal MIDI...
+                Luz fixa no controlador? Clique em "Conectar Bluetooth" novamente.
             </div>
             
             <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:10px;">
-                <div class="section-title" style="color:#ff9800; font-size:11px; letter-spacing:1px; margin-bottom:10px;">ENTRADAS (CONTROLADORES)</div>
+                <div class="section-title" style="color:#ff9800; font-size:11px; margin-bottom:10px;">ENTRADA (CONTROLADOR)</div>
                 <div id="inputs-list"></div>
                 
-                <div class="section-title" style="color:#2196F3; font-size:11px; letter-spacing:1px; margin:20px 0 10px 0;">SAÍDAS (DESTINO SOM)</div>
+                <div class="section-title" style="color:#2196F3; font-size:11px; margin:20px 0 10px 0;">SAÍDA (XPS-10)</div>
                 <div id="outputs-list"></div>
             </div>
         `;
@@ -29,10 +29,7 @@ const MidiConfig = {
 
     log(msg) {
         const consoleEl = document.getElementById('debug-console');
-        if (consoleEl) {
-            consoleEl.innerHTML = `> ${msg}`;
-            console.log("MIDI Master Log:", msg);
-        }
+        if (consoleEl) consoleEl.innerHTML = `> ${msg}`;
     },
 
     async updateDeviceLists() {
@@ -44,13 +41,15 @@ const MidiConfig = {
         outList.innerHTML = "";
 
         if (typeof WebMidi !== 'undefined' && WebMidi.enabled) {
-            // Monitor de Atividade em tempo real
+            this.log(`In:${WebMidi.inputs.length} | Out:${WebMidi.outputs.length}`);
+
             WebMidi.inputs.forEach(input => {
                 input.removeListener("midimessage");
                 input.addListener("midimessage", e => {
-                    this.log(`Sinal recebido de: ${input.name} | Nota: ${e.data[1]}`);
+                    this.log(`SINAL: ${input.name} | Nota: ${e.data[1]}`);
+                    const outId = MidiEngine.getRouting().outId;
+                    if (outId) WebMidi.getOutputById(outId).send(e.data);
                 });
-
                 const isSelected = MidiEngine.getRouting().inId === input.id;
                 inList.innerHTML += this._renderItem('in', input, isSelected);
             });
@@ -63,40 +62,57 @@ const MidiConfig = {
     },
 
     _renderItem(type, device, isSelected) {
-        const isBLE = device.name && (device.name.toLowerCase().includes('midi') || !device.connection || device.connection !== 'usb');
         const color = type === 'in' ? '#ff9800' : '#2196F3';
-        
         return `
             <div onclick="MidiConfig.applySelection('${type}', '${device.id}')" 
-                 style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:${isSelected ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)'}; margin-bottom:8px; border-radius:10px; border:1px solid ${isSelected ? color : 'transparent'}; cursor:pointer;">
+                 style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(255,255,255,0.05); margin-bottom:8px; border-radius:10px; border:1px solid ${isSelected ? color : 'transparent'}; cursor:pointer;">
                 <div style="pointer-events:none;">
                     <div style="color:white; font-size:14px; font-weight:bold;">${device.name || 'Disp. MIDI'}</div>
-                    <small style="color:${color}; font-size:9px; text-transform:uppercase;">${type === 'in' ? 'Controlador' : 'Saída'} [${device.id.substring(0,5)}]</small>
+                    <small style="color:${color}; font-size:9px;">ID: ${device.id.substring(0,8)}</small>
                 </div>
-                <div style="width:18px; height:18px; border-radius:50%; border:2px solid ${isSelected ? color : '#444'}; background:${isSelected ? color : 'transparent'}; transition: 0.2s;"></div>
+                <div style="width:16px; height:16px; border-radius:50%; background:${isSelected ? color : '#333'};"></div>
             </div>`;
     },
 
     async forceRebind() {
-        this.log("Re-escaneando hardware...");
+        this.log("Sincronizando portas...");
         await WebMidi.disable();
         await WebMidi.enable({ sysex: true });
         await MidiEngine.start();
-        setTimeout(() => this.updateDeviceLists(), 600);
+        this.updateDeviceLists();
     },
 
     async scanBLE() {
-        if (!navigator.bluetooth) return this.log("Sem Bluetooth no navegador.");
+        if (!navigator.bluetooth) return this.log("Sem suporte Bluetooth.");
         try {
-            this.log("Buscando Bluetooth...");
+            this.log("Iniciando busca...");
             const device = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true,
-                optionalServices: ['03b80100-8366-4e49-b312-331dee746c28']
+                optionalServices: ['03b80100-8366-4e49-b312-331dee746c28', 'battery_service', 'device_information']
             });
-            this.log("Pareando...");
-            await device.gatt.connect();
-            this.log("Conectado! Verifique a lista.");
-            setTimeout(() => this.forceRebind(), 1500);
+            
+            this.log("Conectando...");
+            const server = await device.gatt.connect();
+            
+            // TENTATIVA DE DESPERTAR: Acessamos o serviço MIDI explicitamente
+            this.log("Ativando fluxo MIDI...");
+            try {
+                const service = await server.getPrimaryService('03b80100-8366-4e49-b312-331dee746c28');
+                this.log("Serviço MIDI OK. Verificando portas...");
+            } catch (e) {
+                this.log("Aviso: Tentando modo alternativo...");
+            }
+
+            // Aguardamos 2 segundos para o Android registrar o driver MIDI
+            setTimeout(async () => {
+                await this.forceRebind();
+                if (WebMidi.inputs.length < 2) {
+                    this.log("Conectado, mas o controlador ainda não enviou dados.");
+                } else {
+                    this.log("Controlador detectado!");
+                }
+            }, 2000);
+
         } catch (err) {
             this.log("Erro: " + err.message);
         }
@@ -104,10 +120,7 @@ const MidiConfig = {
 
     applySelection(type, id) {
         const current = MidiEngine.getRouting();
-        let inId = type === 'in' ? id : current.inId;
-        let outId = type === 'out' ? id : current.outId;
-        MidiEngine.setRouting(inId, outId);
+        MidiEngine.setRouting(type === 'in' ? id : current.inId, type === 'out' ? id : current.outId);
         this.updateDeviceLists();
-        this.log("Dispositivo Ativado!");
     }
 };
