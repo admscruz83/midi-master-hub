@@ -1,5 +1,5 @@
 /**
- * MIDI Engine - Final Fix para Roland XPS
+ * MIDI Engine - Inicialização à Prova de Falhas
  */
 const MidiEngine = (() => {
     const state = {
@@ -10,26 +10,41 @@ const MidiEngine = (() => {
     };
 
     const init = async () => {
-        try {
-            // Se o WebMidi já existir, vamos forçar um reset para garantir
-            if (typeof WebMidi !== 'undefined' && WebMidi.enabled) {
-                await WebMidi.disable();
+        return new Promise(async (resolve) => {
+            console.log("Iniciando processo de ativação...");
+            
+            // Timeout de segurança: se em 3s não inicializar, ele força o erro para não travar
+            const timeout = setTimeout(() => {
+                console.error("Timeout na inicialização do WebMidi");
+                resolve(false);
+            }, 3000);
+
+            try {
+                // Se já estiver habilitado, reseta
+                if (typeof WebMidi !== 'undefined' && WebMidi.enabled) {
+                    await WebMidi.disable();
+                }
+
+                // Tenta primeiro com Sysex (ideal para Roland)
+                await WebMidi.enable({ sysex: true });
+                console.log("WebMidi: ON com Sysex");
+            } catch (err) {
+                console.warn("Sysex negado, tentando modo básico...");
+                try {
+                    // Tenta sem Sysex (mais compatível)
+                    await WebMidi.enable();
+                    console.log("WebMidi: ON (Básico)");
+                } catch (e) {
+                    clearTimeout(timeout);
+                    resolve(false);
+                    return;
+                }
             }
 
-            await WebMidi.enable({ sysex: true });
-            console.log("WebMidi: Habilitado");
+            clearTimeout(timeout);
             _setupRouting();
-            return true;
-        } catch (err) {
-            console.warn("Erro no Sysex, tentando modo simples...");
-            try {
-                await WebMidi.enable();
-                _setupRouting();
-                return true;
-            } catch (e) {
-                return false;
-            }
-        }
+            resolve(true);
+        });
     };
 
     const _setupRouting = () => {
@@ -53,7 +68,6 @@ const MidiEngine = (() => {
         const savedIn = localStorage.getItem('pref_midi_in');
         const savedOut = localStorage.getItem('pref_midi_out');
         
-        // Tenta pegar o salvo ou o primeiro disponível
         state.mainInput = WebMidi.getInputById(savedIn) || WebMidi.inputs[0] || null;
         state.mainOutput = WebMidi.getOutputById(savedOut) || WebMidi.outputs[0] || null;
         
