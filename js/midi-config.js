@@ -1,5 +1,5 @@
 /**
- * MIDI Config - Versão Compatibilidade Total (BLE + USB)
+ * MIDI Config - Modo Aberto (Accept All) com Re-scan Agressivo
  */
 const MidiConfig = {
     renderDeviceList() {
@@ -8,11 +8,11 @@ const MidiConfig = {
 
         listContainer.innerHTML = `
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
-                <button class="action-btn" onclick="MidiConfig.scanUSB(event)" style="background:#6750a4; color:white; border:none;">Reset USB</button>
-                <button class="action-btn" onclick="MidiConfig.scanBLE(event)" style="background:#2b3a55; border: 1px solid #4a6fa5; color:white;">+ Bluetooth</button>
+                <button class="action-btn" onclick="MidiConfig.scanUSB(event)" style="background:#6750a4; color:white; border:none;">Reset MIDI</button>
+                <button class="action-btn" onclick="MidiConfig.scanBLE(event)" style="background:#2b3a55; border:1px solid #4a6fa5; color:white;">+ Bluetooth</button>
             </div>
-            <div id="debug-console" style="font-size:10px; color:#4CAF50; background:#000; padding:10px; margin-bottom:15px; border-radius:8px; font-family:monospace; min-height:40px;">
-                Dica: Selecione seu controlador na lista que aparecer.
+            <div id="debug-console" style="font-size:10px; color:#4CAF50; background:#000; padding:10px; margin-bottom:15px; border-radius:8px; font-family:monospace; min-height:45px;">
+                Status: Aguardando conexão...
             </div>
             <div class="section-title">Saída (Para Roland XPS)</div>
             <div id="outputs-list"></div>
@@ -25,9 +25,10 @@ const MidiConfig = {
     log(msg) {
         const consoleEl = document.getElementById('debug-console');
         if (consoleEl) consoleEl.innerHTML = `> ${msg}`;
+        console.log("MIDI Log:", msg);
     },
 
-    updateDeviceLists() {
+    async updateDeviceLists() {
         const outList = document.getElementById('outputs-list');
         const inList = document.getElementById('inputs-list');
         if (!outList || !inList) return;
@@ -36,8 +37,13 @@ const MidiConfig = {
         inList.innerHTML = "";
 
         if (typeof WebMidi !== 'undefined' && WebMidi.enabled) {
-            this.log(`Online | In: ${WebMidi.inputs.length} | Out: ${WebMidi.outputs.length}`);
+            this.log(`Portas: ${WebMidi.inputs.length} In / ${WebMidi.outputs.length} Out`);
             
+            if (WebMidi.outputs.length === 0 && WebMidi.inputs.length === 0) {
+                outList.innerHTML = inList.innerHTML = `<div style="opacity:0.3; font-size:11px; padding:10px;">Nenhum dispositivo MIDI disponível.</div>`;
+                return;
+            }
+
             WebMidi.outputs.forEach(dev => {
                 const isSel = MidiEngine.getRouting().outId === dev.id;
                 outList.innerHTML += this._renderItem('out', dev, isSel);
@@ -55,48 +61,58 @@ const MidiConfig = {
             <div class="menu-item no-arrow" onclick="MidiConfig.applySelection('${type}', '${device.id}')" 
                  style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:rgba(255,255,255,0.05); margin-bottom:5px; border-radius:8px; cursor:pointer;">
                 <div style="display:flex; flex-direction:column; pointer-events:none;">
-                    <span style="font-size:14px; color:white;">${device.name || 'Dispositivo MIDI'}</span>
-                    <small style="opacity:0.5; font-size:10px;">Porta: ${device.connection || 'MIDI Interface'}</small>
+                    <span style="font-size:14px; color:white;">${device.name || 'Disp. Desconhecido'}</span>
+                    <small style="opacity:0.5; font-size:9px;">${device.manufacturer || 'MIDI Port'} (${type})</small>
                 </div>
                 <div class="radio-circle ${isSelected ? 'selected' : ''}"></div>
             </div>`;
     },
 
     async scanUSB(e) {
-        this.log("Atualizando portas...");
+        this.log("Forçando reinicialização do motor...");
+        await WebMidi.disable(); // Desliga para limpar o cache de portas
         await MidiEngine.start();
         this.updateDeviceLists();
     },
 
     async scanBLE(e) {
-        if (!navigator.bluetooth) {
-            this.log("ERRO: Web Bluetooth não disponível.");
-            return;
-        }
+        if (!navigator.bluetooth) return this.log("Navegador não suporta Bluetooth.");
         
         try {
-            this.log("Abrindo seletor de dispositivos...");
-            
-            // Usando a configuração que funcionou no teste do Google
+            this.log("Iniciando busca (Modo Aberto)...");
             const device = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true,
-                optionalServices: ['03b80100-8366-4e49-b312-331dee746c28'] // UUID MIDI
+                optionalServices: ['03b80100-8366-4e49-b312-331dee746c28']
             });
 
-            this.log(`Conectando a ${device.name}...`);
+            this.log(`Conectando a: ${device.name}`);
             const server = await device.gatt.connect();
             
-            this.log("Pareado! Ativando motor MIDI...");
+            this.log("GATT Conectado! Sincronizando com Android...");
             
-            // Forçamos o WebMidi a reiniciar para "enxergar" a nova porta Bluetooth
-            await WebMidi.enable();
-            await MidiEngine.start();
-            
-            this.updateDeviceLists();
-            this.log(`Sucesso: ${device.name} conectado.`);
+            // Loop de Redetecção Agressivo
+            let checkCount = 0;
+            const checkInterval = setInterval(async () => {
+                checkCount++;
+                
+                // Força o sistema a re-escanear dispositivos MIDI
+                await WebMidi.enable(); 
+                await MidiEngine.start();
+                this.updateDeviceLists();
+                
+                if (WebMidi.inputs.length > 0) {
+                    clearInterval(checkInterval);
+                    this.log("Controlador detectado com sucesso!");
+                } else if (checkCount >= 6) {
+                    clearInterval(checkInterval);
+                    this.log("Conectado, mas o Android ainda não criou a porta MIDI.");
+                } else {
+                    this.log(`Buscando porta MIDI... (Tentativa ${checkCount})`);
+                }
+            }, 1000);
+
         } catch (err) {
             this.log("Erro: " + err.message);
-            console.error(err);
         }
     },
 
