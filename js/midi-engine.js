@@ -1,5 +1,5 @@
 /**
- * MIDI Engine - Versão Direct-Connect v3
+ * MIDI Engine - Suporte Hot-Swap BLE/USB
  */
 const MidiEngine = (() => {
     const state = {
@@ -11,73 +11,76 @@ const MidiEngine = (() => {
 
     const init = async () => {
         try {
-            // Se já estiver ativado, retorna ok
-            if (WebMidi.enabled) return true;
-
-            // Ativação direta conforme padrão WebMidi v3
+            // Se já estiver ativo, não desabilita, apenas garante a ativação
             await WebMidi.enable({ sysex: true });
-            console.log("WebMidi: ON");
-            
+            console.log("WebMidi: Ativo");
             _setupRouting();
             return true;
         } catch (err) {
-            console.warn("Erro Sysex, tentando básico...");
             try {
                 await WebMidi.enable();
                 _setupRouting();
                 return true;
             } catch (e) {
-                console.error("Falha total na ativação MIDI");
                 return false;
             }
         }
     };
 
     const _setupRouting = () => {
-        // Monitora entrada/saída de cabos
-        WebMidi.addListener("connected", () => {
+        // Remove ouvintes antigos para evitar duplicidade ao reconectar BLE
+        WebMidi.removeListener("connected");
+        WebMidi.addListener("connected", (e) => {
+            console.log(`Dispositivo conectado: ${e.port.name}`);
             _updatePorts();
             if (window.MidiConfig) window.MidiConfig.updateDeviceLists();
         });
+
+        WebMidi.removeListener("disconnected");
         WebMidi.addListener("disconnected", () => {
             _updatePorts();
             if (window.MidiConfig) window.MidiConfig.updateDeviceLists();
         });
+
         _updatePorts();
     };
 
     const _updatePorts = () => {
-        // Na v3, acessamos as portas assim:
-        state.mainInput = WebMidi.inputs[0] || null;
-        state.mainOutput = WebMidi.outputs[0] || null;
+        // Prioriza dispositivos selecionados ou pega o primeiro disponível
+        const savedIn = localStorage.getItem('pref_midi_in');
+        const savedOut = localStorage.getItem('pref_midi_out');
+        
+        state.mainInput = WebMidi.getInputById(savedIn) || WebMidi.inputs[0] || null;
+        state.mainOutput = WebMidi.getOutputById(savedOut) || WebMidi.outputs[0] || null;
+        
         _applyListeners();
     };
 
     const _applyListeners = () => {
-        WebMidi.inputs.forEach(input => input.removeListener());
-        if (state.mainInput) {
-            state.mainInput.addListener("midimessage", (e) => {
-                // Na v3, o canal é e.message.channel
+        // Escuta TODAS as entradas ativas para feedback visual, 
+        // mas só faz o roteamento (THRU) da entrada selecionada
+        WebMidi.inputs.forEach(input => {
+            input.removeListener("midimessage");
+            input.addListener("midimessage", (e) => {
                 const channel = e.message.channel;
                 const status = e.data[0] & 0xF0;
-                
-                if ((status === 0x90 || status === 0xB0) && typeof window.triggerVisualFeedback === "function") {
+
+                // Feedback visual para qualquer nota em qualquer controlador
+                if ((status === 0x90) && typeof window.triggerVisualFeedback === "function") {
                     window.triggerVisualFeedback(channel);
                 }
-                
-                if (state.mainOutput) {
+
+                // Roteamento: Se for a entrada principal, manda para a saída
+                if (input === state.mainInput && state.mainOutput) {
                     state.mainOutput.send(e.data);
                 }
             });
-        }
+        });
     };
 
     return {
         start: init,
-        getRouting: () => ({ 
-            inId: state.mainInput ? state.mainInput.id : null, 
-            outId: state.mainOutput ? state.mainOutput.id : null 
-        }),
+        getRouting: () => ({ inId: state.mainInput?.id, outId: state.mainOutput?.id }),
         setRouting: (inId, outId) => {
             state.mainInput = WebMidi.getInputById(inId) || null;
             state.mainOutput = WebMidi.getOutputById(outId) || null;
@@ -85,16 +88,13 @@ const MidiEngine = (() => {
         },
         sendControl: (ch, cc, val) => {
             if (state.mainOutput) {
-                // Na v3, enviamos para o canal específico assim:
                 state.mainOutput.channels[ch].sendControlChange(parseInt(cc), parseInt(val));
             }
         },
         panic: () => {
-            if (state.mainOutput) {
-                for (let i = 1; i <= 16; i++) {
-                    state.mainOutput.channels[i].sendControlChange(123, 0);
-                }
-            }
+            WebMidi.outputs.forEach(out => {
+                for (let i = 1; i <= 16; i++) out.channels[i].sendControlChange(123, 0);
+            });
         }
     };
 })();
