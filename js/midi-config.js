@@ -1,5 +1,5 @@
 /**
- * MIDI Config - Abertura de Fluxo e Sincronização
+ * MIDI Config - Subscrição e Ativação de Fluxo
  */
 const MidiConfig = {
     renderDeviceList() {
@@ -13,14 +13,14 @@ const MidiConfig = {
             </div>
             
             <div id="debug-console" style="font-size:11px; color:#4CAF50; background:#000; padding:12px; margin-bottom:15px; border-radius:8px; font-family:monospace; border:1px solid #333; min-height:60px; line-height:1.4;">
-                Aguardando conexão...
+                Aguardando conexão (Sem USB)...
             </div>
             
             <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:10px; border:1px solid #333;">
-                <div class="section-title" style="color:#ff9800; font-size:11px; margin-bottom:10px; font-weight:bold;">ENTRADA (CONTROLADOR)</div>
+                <div class="section-title" style="color:#ff9800; font-size:11px; margin-bottom:10px; font-weight:bold; letter-spacing:1px;">ENTRADA (CONTROLADOR)</div>
                 <div id="inputs-list" style="min-height:40px;"></div>
                 
-                <div class="section-title" style="color:#2196F3; font-size:11px; margin:20px 0 10px 0; font-weight:bold;">SAÍDA (XPS-10)</div>
+                <div class="section-title" style="color:#2196F3; font-size:11px; margin:20px 0 10px 0; font-weight:bold; letter-spacing:1px;">SAÍDA (DESTINO)</div>
                 <div id="outputs-list" style="min-height:40px;"></div>
             </div>
         `;
@@ -66,13 +66,13 @@ const MidiConfig = {
 
     _renderItem(type, device, isSelected) {
         const color = type === 'in' ? '#ff9800' : '#2196F3';
-        const name = device.name || (type === 'in' ? "Controlador Bluetooth" : "Saída MIDI");
+        const name = device.name || (type === 'in' ? "Controlador Bluetooth" : "Porta de Saída");
         return `
             <div onclick="MidiConfig.applySelection('${type}', '${device.id}')" 
                  style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(255,255,255,0.05); margin-bottom:8px; border-radius:10px; border:1px solid ${isSelected ? color : 'transparent'}; cursor:pointer;">
                 <div style="pointer-events:none;">
                     <div style="color:white; font-size:14px; font-weight:bold;">${name}</div>
-                    <small style="color:${color}; font-size:9px;">PORTA: ${device.id.substring(0,10)}</small>
+                    <small style="color:${color}; font-size:9px;">ID: ${device.id.substring(0,8)}</small>
                 </div>
                 <div style="width:16px; height:16px; border-radius:50%; background:${isSelected ? color : '#333'};"></div>
             </div>`;
@@ -87,7 +87,7 @@ const MidiConfig = {
     },
 
     async scanBLE() {
-        if (!navigator.bluetooth) return this.log("Bluetooth indisponível.");
+        if (!navigator.bluetooth) return this.log("Navegador incompatível.");
         try {
             this.log("Buscando...");
             const device = await navigator.bluetooth.requestDevice({
@@ -95,27 +95,26 @@ const MidiConfig = {
                 optionalServices: ['03b80100-8366-4e49-b312-331dee746c28']
             });
             
-            this.log("Conectando GATT...");
             const server = await device.gatt.connect();
-            
-            this.log("Solicitando Permissão de Fluxo...");
+            this.log("GATT Conectado. Ativando Notificações...");
+
+            // Tentativa de subscrever na característica MIDI para forçar o fluxo
             try {
-                // Força o Android a olhar para a característica MIDI
                 const service = await server.getPrimaryService('03b80100-8366-4e49-b312-331dee746c28');
-                const char = await service.getCharacteristics();
-                this.log("Fluxo MIDI Ativado.");
+                const characteristics = await service.getCharacteristics();
+                for (let char of characteristics) {
+                    if (char.properties.notify || char.properties.read) {
+                        await char.startNotifications();
+                        this.log("Fluxo de dados MIDI subscrito!");
+                    }
+                }
             } catch (e) {
-                this.log("Aviso: Fluxo via GATT secundário...");
+                this.log("Aviso: Falha na subscrição direta, tentando modo nativo...");
             }
 
-            // Espera o Android "montar" o driver após o despertar
             setTimeout(async () => {
                 await this.forceRebind();
-                if (WebMidi.inputs.length < 2 && !WebMidi.inputs.some(i => i.name.toLowerCase().includes("bluetooth") || i.connection !== 'usb')) {
-                    this.log("Atenção: Use o botão 'Atualizar Lista' com o cabo USB desconectado.");
-                } else {
-                    this.log("Dispositivo pronto na lista!");
-                }
+                this.log(WebMidi.inputs.length > 0 ? "Pronto! Selecione na lista." : "In:0 - Reinicie o Bluetooth do celular.");
             }, 3000);
 
         } catch (err) {
@@ -127,6 +126,5 @@ const MidiConfig = {
         const current = MidiEngine.getRouting();
         MidiEngine.setRouting(type === 'in' ? id : current.inId, type === 'out' ? id : current.outId);
         this.updateDeviceLists();
-        this.log("Seleção salva.");
     }
 };
