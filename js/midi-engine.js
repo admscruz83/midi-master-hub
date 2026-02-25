@@ -1,5 +1,5 @@
 /**
- * MIDI Engine Pro - Performance Edition (Fix Juno-D)
+ * MIDI Engine Pro - Performance Edition
  */
 const MidiEngine = (() => {
     const state = {
@@ -10,36 +10,40 @@ const MidiEngine = (() => {
     };
 
     const init = async () => {
-        console.log("Tentando habilitar WebMidi...");
+        console.log("Iniciando WebMidi...");
         try {
-            // Se já estiver ligado, desliga para limpar o cache de hardware do Android
+            // Se já estiver habilitado, tenta apenas reconfigurar as portas
             if (typeof WebMidi !== 'undefined' && WebMidi.enabled) {
-                await WebMidi.disable();
+                _setupRouting();
+                return true;
             }
-
-            // Tentativa 1: Com Sysex (Ideal para Roland)
+            
             await WebMidi.enable({ sysex: true });
-            console.log("WebMidi ativado com Sysex.");
+            console.log("WebMidi ativado com sucesso.");
+            _setupRouting();
+            return true;
         } catch (err) {
-            console.warn("Erro no Sysex, tentando modo básico...");
+            console.warn("Falha no Sysex, tentando modo simples...");
             try {
-                // Tentativa 2: Sem Sysex (Fallback)
                 await WebMidi.enable();
-                console.log("WebMidi ativado no modo básico.");
+                _setupRouting();
+                return true;
             } catch (retryErr) {
-                console.error("WebMidi falhou totalmente.", retryErr);
+                console.error("WebMidi indisponível:", retryErr);
                 return false;
             }
         }
-
-        _setupRouting();
-        return true;
     };
 
     const _setupRouting = () => {
         WebMidi.removeListener("connected");
-        WebMidi.addListener("connected", (e) => {
-            console.log("Conectado:", e.port.name);
+        WebMidi.removeListener("disconnected");
+
+        WebMidi.addListener("connected", () => {
+            _updatePorts();
+            if (typeof MidiConfig !== 'undefined') MidiConfig.updateDeviceLists();
+        });
+        WebMidi.addListener("disconnected", () => {
             _updatePorts();
             if (typeof MidiConfig !== 'undefined') MidiConfig.updateDeviceLists();
         });
@@ -50,7 +54,6 @@ const MidiEngine = (() => {
         const savedIn = localStorage.getItem('pref_midi_in');
         const savedOut = localStorage.getItem('pref_midi_out');
 
-        // Se o Juno-D aparecer, ele será capturado aqui
         state.mainInput = WebMidi.getInputById(savedIn) || WebMidi.inputs[0] || null;
         state.mainOutput = WebMidi.getOutputById(savedOut) || WebMidi.outputs[0] || null;
 
@@ -102,5 +105,3 @@ const MidiEngine = (() => {
         }
     };
 })();
-
-window.addEventListener('load', () => MidiEngine.start());
