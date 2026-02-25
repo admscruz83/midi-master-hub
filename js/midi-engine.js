@@ -1,5 +1,5 @@
 /**
- * MIDI Engine - Versão Desbloqueio Chrome Android
+ * MIDI Engine - Final Fix para Roland XPS
  */
 const MidiEngine = (() => {
     const state = {
@@ -11,39 +11,52 @@ const MidiEngine = (() => {
 
     const init = async () => {
         try {
-            // Se já estiver ligado, não faz nada
-            if (typeof WebMidi !== 'undefined' && WebMidi.enabled) return true;
+            // Se o WebMidi já existir, vamos forçar um reset para garantir
+            if (typeof WebMidi !== 'undefined' && WebMidi.enabled) {
+                await WebMidi.disable();
+            }
 
-            // Tenta habilitar com uma promessa que não trava o resto do código
             await WebMidi.enable({ sysex: true });
-            console.log("WebMidi: OK (Sysex)");
+            console.log("WebMidi: Habilitado");
+            _setupRouting();
+            return true;
         } catch (err) {
-            console.warn("Tentando sem Sysex...");
+            console.warn("Erro no Sysex, tentando modo simples...");
             try {
                 await WebMidi.enable();
+                _setupRouting();
+                return true;
             } catch (e) {
-                console.error("WebMidi falhou criticamente.");
                 return false;
             }
         }
-        _setupRouting();
-        return true;
     };
 
     const _setupRouting = () => {
         WebMidi.removeListener("connected");
+        WebMidi.removeListener("disconnected");
+        
         WebMidi.addListener("connected", () => {
             _updatePorts();
-            if (typeof MidiConfig !== 'undefined') MidiConfig.updateDeviceLists();
+            if (window.MidiConfig) window.MidiConfig.updateDeviceLists();
         });
+        
+        WebMidi.addListener("disconnected", () => {
+            _updatePorts();
+            if (window.MidiConfig) window.MidiConfig.updateDeviceLists();
+        });
+
         _updatePorts();
     };
 
     const _updatePorts = () => {
         const savedIn = localStorage.getItem('pref_midi_in');
         const savedOut = localStorage.getItem('pref_midi_out');
+        
+        // Tenta pegar o salvo ou o primeiro disponível
         state.mainInput = WebMidi.getInputById(savedIn) || WebMidi.inputs[0] || null;
         state.mainOutput = WebMidi.getOutputById(savedOut) || WebMidi.outputs[0] || null;
+        
         _applyListeners();
     };
 
@@ -73,11 +86,14 @@ const MidiEngine = (() => {
             state.mainOutput = WebMidi.getOutputById(outId) || null;
             _applyListeners();
         },
-        sendControl: (ch, cc, val) => state.mainOutput?.channels[ch].sendControlChange(parseInt(cc), parseInt(val)),
+        sendControl: (ch, cc, val) => {
+            if (state.mainOutput) {
+                state.mainOutput.channels[ch].sendControlChange(parseInt(cc), parseInt(val));
+            }
+        },
         panic: () => {
-            if (!state.mainOutput) return;
-            for (let i = 1; i <= 16; i++) {
-                state.mainOutput.channels[i].sendControlChange(123, 0);
+            if (state.mainOutput) {
+                for (let i = 1; i <= 16; i++) state.mainOutput.channels[i].sendControlChange(123, 0);
             }
         }
     };
