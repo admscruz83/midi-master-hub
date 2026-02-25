@@ -1,5 +1,5 @@
 /**
- * MIDI Config - Performance & Sync Fix
+ * MIDI Config Bridge - Diagnóstico e Conectividade
  */
 const MidiConfig = {
     renderDeviceList() {
@@ -11,10 +11,14 @@ const MidiConfig = {
                 <button id="btn-usb-scan" class="action-btn" onclick="MidiConfig.scanUSB(event)" style="background:#6750a4; color:white; border:none;">Detectar USB</button>
                 <button class="action-btn ble-btn" style="background: #2b3a55; border: 1px solid #4a6fa5; color:white;" onclick="MidiConfig.scanBLE()">Buscar BLE MIDI</button>
             </div>
-            <div class="section-title">Saída (Destino)</div>
-            <div id="outputs-list"></div>
-            <div class="section-title" style="margin-top:25px;">Entrada (Controlador)</div>
-            <div id="inputs-list"></div>
+            <div id="midi-outputs-section">
+                <div class="section-title">Saída (Destino)</div>
+                <div id="outputs-list"></div>
+            </div>
+            <div id="midi-inputs-section" style="margin-top:25px;">
+                <div class="section-title">Entrada (Controlador)</div>
+                <div id="inputs-list"></div>
+            </div>
         `;
         this.updateDeviceLists();
     },
@@ -35,7 +39,7 @@ const MidiConfig = {
                 outList.innerHTML += this._renderItem('out', device, isSelected);
             });
         } else {
-            outList.innerHTML = `<div class="menu-item no-arrow" style="opacity:0.5; font-size:12px; color:white; padding:10px;">Aguardando saída...</div>`;
+            outList.innerHTML = `<div class="menu-item no-arrow" style="opacity:0.5; font-size:12px; color:white;">Nenhum dispositivo encontrado.</div>`;
         }
 
         if (isReady && WebMidi.inputs.length > 0) {
@@ -44,50 +48,45 @@ const MidiConfig = {
                 inList.innerHTML += this._renderItem('in', device, isSelected);
             });
         } else {
-            inList.innerHTML = `<div class="menu-item no-arrow" style="opacity:0.5; font-size:12px; color:white; padding:10px;">Aguardando entrada...</div>`;
+            inList.innerHTML = `<div class="menu-item no-arrow" style="opacity:0.5; font-size:12px; color:white;">Ligue o XPS-10 via OTG.</div>`;
         }
     },
 
     _renderItem(type, device, isSelected) {
         return `
-            <div class="menu-item no-arrow" onclick="MidiConfig.applySelection('${type}', '${device.id}')" 
+            <div class="menu-item no-arrow" onclick="MidiConfig.applySelection('${type}', '${device.id}')"
                  style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:rgba(255,255,255,0.05); margin-bottom:5px; border-radius:8px; cursor:pointer;">
                 <div style="display:flex; flex-direction:column; pointer-events:none;">
                     <span style="font-size:14px; font-weight:500; color:white;">${device.name}</span>
-                    <small style="opacity:0.5; font-size:10px; color:white;">${device.manufacturer || 'MIDI Port'}</small>
+                    <small style="opacity:0.5; font-size:10px; color:white;">${device.manufacturer || 'USB MIDI'}</small>
                 </div>
                 <div class="radio-circle ${isSelected ? 'selected' : ''}"></div>
-            </div>`;
+            </div>
+        `;
     },
 
     async scanUSB(e) {
         const btn = e.target;
         btn.innerText = "Buscando...";
-        btn.disabled = true;
         
+        // Tenta pedir acesso nativo primeiro para forçar o balão de permissão
         try {
-            // Força o acesso e espera o motor iniciar
-            await MidiEngine.start();
-            
-            // Loop de Redetecção: Tenta 3 vezes com intervalos de 500ms
-            let attempts = 0;
-            const checkHardware = setInterval(() => {
-                attempts++;
-                this.updateDeviceLists();
-                
-                // Se achou algo ou deu 3 tentativas, para
-                if (WebMidi.inputs.length > 0 || attempts >= 3) {
-                    clearInterval(checkHardware);
-                    btn.innerText = "Detectar USB";
-                    btn.disabled = false;
-                    console.log("Busca finalizada após " + attempts + " tentativas.");
-                }
-            }, 500);
+            if (navigator.requestMIDIAccess) {
+                // Não usamos await aqui para não travar o botão se o Chrome ignorar
+                navigator.requestMIDIAccess({ sysex: true }).then(() => {
+                    console.log("Permissão MIDI concedida.");
+                }).catch(err => console.warn("Permissão negada ou ignorada."));
+            }
+        } catch (err) {}
 
-        } catch (err) {
-            btn.innerText = "Erro!";
-            btn.disabled = false;
-        }
+        // Inicia o motor MIDI
+        await MidiEngine.start();
+
+        // Aguarda um pouco e atualiza a lista, independente da permissão travar
+        setTimeout(() => {
+            this.updateDeviceLists();
+            btn.innerText = "Detectar USB";
+        }, 1500);
     },
 
     async scanBLE() {
