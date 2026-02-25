@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>MIDI Master Hub</title>
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+        /* Estilos específicos para a lista de dispositivos dentro da Settings Page */
+        .section-title {
+            font-size: 11px; color: var(--primary-color);
+            margin: 10px 0 8px 5px; text-transform: uppercase;
+            letter-spacing: 1px; font-weight: bold; opacity: 0.7;
+        }
+        .radio-circle {
+            width: 20px; height: 20px; border: 2px solid var(--outline-color);
+            border-radius: 50%; position: relative; transition: all 0.2s;
+        }
+        .radio-circle.selected { border-color: var(--primary-color); background: var(--primary-color); }
+        .radio-circle.selected::after {
+            content: ''; position: absolute; width: 8px; height: 8px;
+            background: var(--on-primary); border-radius: 50%; top: 4px; left: 4px;
+        }
+        .action-btn {
+            background: rgba(255,255,255,0.05); border: 1px solid var(--outline-color);
+            color: var(--primary-color); padding: 12px; border-radius: 12px;
+            font-size: 12px; font-weight: bold; cursor: pointer;
+            width: 100%; /* Garante que o botão ocupe o espaço no grid */
+        }
+        .action-btn:active { background: rgba(208, 188, 255, 0.1); }
+
+        /* FEEDBACK DE TESTE: Brilho ao receber sinal MIDI */
+        .midi-active {
+            box-shadow: 0 0 15px var(--primary-color) !important;
+            border-color: var(--primary-color) !important;
+            transform: scale(1.02);
+            transition: all 0.05s ease;
+        }
+
+        #midi-status-dot {
+            width: 8px; height: 8px; background: #4CAF50; border-radius: 50%;
+            display: none; margin-left: 10px;
+            box-shadow: 0 0 8px #4CAF50;
+        }
+    </style>
+</head>
+<body>
+
+<header id="status-bar">
+    <div class="logo" style="display:flex; align-items:center;">
+        MIDI <span>MASTER</span>
+        <div id="midi-status-dot" title="Sinal MIDI Ativo"></div>
+    </div>
+    <div class="header-actions">
+        <button class="icon-button-small" onclick="toggleSettings(true)">⚙️</button>
+        <button class="panic-btn" onclick="MidiEngine.panic()">⚡</button>
+    </div>
+</header>
+
+<main id="pads-container"></main>
+
+<div id="settings-page" class="full-page">
+    <header class="page-header">
+        <button class="icon-button-small" style="border:none; background:none; font-size:24px;" onclick="toggleSettings(false)">←</button>
+        <h2 style="margin-left:15px; font-size:20px;">Configurações</h2>
+    </header>
+    <div class="page-content" id="settings-content"></div>
+</div>
+
+<div id="editor-sheet" class="bottom-sheet">
+    <div class="sheet-content">
+        <div style="width:30px; height:4px; background:var(--outline-color); opacity:0.2; border-radius:2px; margin:0 auto 15px auto;"></div>
+        <header style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h2 id="edit-title" style="margin:0; font-size:18px;">Configurar Canal</h2>
+            <button class="icon-button-small" style="width:32px; height:32px; border:none; background:none; font-size:20px; color:white;" onclick="closeEditor()">✕</button>
+        </header>
+        <div id="editor-controls">
+            <input type="text" id="input-name" placeholder="Nome do Instrumento" autocomplete="off">
+            <div id="sliders-stack"></div>
+        </div>
+    </div>
+</div>
+
+<script src="js/webmidi.js"></script>
+<script src="js/midi-engine.js"></script>
+<script src="js/midi-config.js"></script>
+<script>
+    const container = document.getElementById('pads-container');
+    const editorSheet = document.getElementById('editor-sheet');
+    const settingsPage = document.getElementById('settings-page');
+    const statusDot = document.getElementById('midi-status-dot');
+    let activeChannel = null;
+
+    const CONTROL_DEFS = [
+        { prop: 'vol', label: 'Volume', cc: 7 },
+        { prop: 'cutoff', label: 'Cutoff', cc: 74 },
+        { prop: 'attack', label: 'Attack', cc: 73 },
+        { prop: 'reso', label: 'Reson', cc: 71 },
+        { prop: 'release', label: 'Release', cc: 72 }
+    ];
+
+    let chStates = JSON.parse(localStorage.getItem('midi_master_v3_states')) ||
+        Array.from({length: 17}, () => ({
+            name: "Piano", vol: 100, cutoff: 64, reso: 64, attack: 64, release: 64
+        }));
+
+    function save() { localStorage.setItem('midi_master_v3_states', JSON.stringify(chStates)); }
+
+    window.triggerVisualFeedback = (ch) => {
+        const pad = document.getElementById(`pad-${ch}`);
+        if (pad) {
+            pad.classList.add('midi-active');
+            statusDot.style.display = 'block';
+            setTimeout(() => pad.classList.remove('midi-active'), 100);
+            clearTimeout(window.midiTimeout);
+            window.midiTimeout = setTimeout(() => statusDot.style.display = 'none', 500);
+        }
+    };
+
+    function renderPads() {
+        container.innerHTML = "";
+        for (let ch = 1; ch <= 16; ch++) {
+            const state = chStates[ch];
+            const pad = document.createElement('div');
+            pad.className = 'pad-card' + (activeChannel === ch ? ' active-editing' : '');
+            pad.id = `pad-${ch}`;
+            pad.onclick = (e) => { if (e.target.type !== 'range') openEditor(ch); };
+            pad.innerHTML = `
+                <div class="pad-info">
+                    <div class="pad-header">CH ${ch.toString().padStart(2, '0')}</div>
+                    <div class="pad-timbre-name">${state.name}</div>
+                </div>
+                <div class="pad-slider-container">
+                    <label id="val-display-${ch}">VOLUME: ${state.vol}</label>
+                    <input type="range" class="inline-volume" min="0" max="127" value="${state.vol}"
+                        oninput="updateVolumeInline(${ch}, this.value)" onclick="event.stopPropagation()">
+                </div>
+            `;
+            container.appendChild(pad);
+        }
+    }
+
+    function toggleSettings(show) {
+        if (show) {
+            renderSettingsMenu();
+            settingsPage.classList.add('visible');
+        } else {
+            settingsPage.classList.remove('visible');
+        }
+    }
+
+    function renderSettingsMenu() {
+        document.getElementById('settings-content').innerHTML = `
+            <div class="menu-list">
+                <div class="menu-item" onclick="showMidiDevices()">
+                    <span>Dispositivos MIDI</span>
+                    <span style="color:var(--primary-color)">❯</span>
+                </div>
+                <div class="menu-item" onclick="alert('Opções de Tema em breve')">
+                    <span>Aparência</span>
+                    <span style="color:var(--primary-color)">❯</span>
+                </div>
+                <div class="menu-item" onclick="alert('MIDI Master v1.0.2')">
+                    <span>Sobre o App</span>
+                    <span style="opacity:0.5">v1.0.2</span>
+                </div>
+            </div>
+        `;
+    }
+
+    function showMidiDevices() {
+        const content = document.getElementById('settings-content');
+
+        content.innerHTML = `
+            <div id="midi-setup-wrapper" style="padding: 10px;">
+                <button class="icon-button-small" style="border:none; background:none; color:var(--primary-color); padding:0; margin-bottom:20px; width:auto; font-weight:bold; cursor:pointer;" onclick="renderSettingsMenu()">← Voltar</button>
+                <div id="midi-device-list">
+                   <p style="font-size:12px; opacity:0.5;">Carregando interface MIDI...</p>
+                </div>
+            </div>
+        `;
+
+        try {
+            if (typeof MidiConfig !== 'undefined') {
+                MidiConfig.renderDeviceList();
+            } else {
+                throw new Error("MidiConfig não definido.");
+            }
+        } catch (err) {
+            console.error(err);
+            document.getElementById('midi-device-list').innerHTML = `<p style="color:red; font-size:12px;">Erro ao carregar MIDI: ${err.message}</p>`;
+        }
+    }
+
+    function openEditor(ch) {
+        activeChannel = ch;
+        document.getElementById('edit-title').innerText = `Configurar CH ${ch.toString().padStart(2, '0')}`;
+        const stack = document.getElementById('sliders-stack');
+        stack.innerHTML = "";
+        CONTROL_DEFS.forEach(ctrl => {
+            const val = chStates[ch][ctrl.prop];
+            const row = document.createElement('div');
+            row.className = 'control-row';
+            row.innerHTML = `
+                <label id="label-${ctrl.prop}">${ctrl.label} (${val})</label>
+                <div class="stepper-container">
+                    <button class="btn-step" onclick="changeValue('${ctrl.prop}', ${ctrl.cc}, chStates[activeChannel].${ctrl.prop} - 1, '${ctrl.label}')">-</button>
+                    <input type="range" id="range-${ctrl.prop}" min="0" max="127" value="${val}" oninput="changeValue('${ctrl.prop}', ${ctrl.cc}, this.value, '${ctrl.label}')">
+                    <button class="btn-step" onclick="changeValue('${ctrl.prop}', ${ctrl.cc}, chStates[activeChannel].${ctrl.prop} + 1, '${ctrl.label}')">+</button>
+                </div>`;
+            stack.appendChild(row);
+        });
+        document.getElementById('input-name').value = chStates[ch].name;
+        document.getElementById('input-name').oninput = (e) => {
+            chStates[activeChannel].name = e.target.value;
+            renderPads();
+            save();
+        };
+        container.classList.add('sheets-open');
+        editorSheet.classList.add('visible');
+        renderPads();
+        const pad = document.getElementById(`pad-${ch}`);
+        if (pad) setTimeout(() => pad.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+    }
+
+    function closeEditor() {
+        editorSheet.classList.remove('visible');
+        container.classList.remove('sheets-open');
+        activeChannel = null;
+        renderPads();
+    }
+
+    function updateVolumeInline(ch, val) {
+        val = parseInt(val);
+        chStates[ch].vol = val;
+        document.getElementById(`val-display-${ch}`).innerText = `VOLUME: ${val}`;
+        MidiEngine.sendControl(ch, 7, val);
+        save();
+    }
+
+    function changeValue(prop, cc, newVal, labelText) {
+        if (!activeChannel) return;
+        newVal = Math.max(0, Math.min(127, parseInt(newVal)));
+        chStates[activeChannel][prop] = newVal;
+        const r = document.getElementById(`range-${prop}`);
+        if(r) r.value = newVal;
+        const l = document.getElementById(`label-${prop}`);
+        if(l) l.innerHTML = `${labelText} (${newVal})`;
+        MidiEngine.sendControl(activeChannel, cc, newVal);
+        save();
+    }
+
+    // CORREÇÃO: Inicializa os pads e o motor MIDI ao carregar a página
+    document.addEventListener('DOMContentLoaded', () => {
+        renderPads();
+        if (typeof MidiEngine !== 'undefined') {
+            MidiEngine.start();
+        }
+    });
+</script>
+</body>
+</html>
