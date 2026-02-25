@@ -1,5 +1,5 @@
 /**
- * MIDI Config Bridge - Ativador de Hardware
+ * MIDI Config - Ativador de Permissões Nativo
  */
 const MidiConfig = {
     renderDeviceList() {
@@ -8,7 +8,7 @@ const MidiConfig = {
 
         listContainer.innerHTML = `
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px;">
-                <button id="btn-usb-scan" class="action-btn" onclick="MidiConfig.scanUSB(event)" style="background:#6750a4; color:white; border:none;">Detectar USB</button>
+                <button class="action-btn" onclick="MidiConfig.scanUSB(event)" style="background:#6750a4; color:white; border:none;">Detectar USB</button>
                 <button class="action-btn ble-btn" style="background: #2b3a55; border: 1px solid #4a6fa5; color:white;" onclick="MidiConfig.scanBLE()">Buscar BLE MIDI</button>
             </div>
             <div class="section-title">Saída (Destino)</div>
@@ -27,7 +27,6 @@ const MidiConfig = {
         outList.innerHTML = "";
         inList.innerHTML = "";
 
-        // Verifica se o WebMidi está habilitado e se existem portas
         const isReady = (typeof WebMidi !== 'undefined' && WebMidi.enabled);
 
         if (isReady && WebMidi.outputs.length > 0) {
@@ -36,7 +35,7 @@ const MidiConfig = {
                 outList.innerHTML += this._renderItem('out', device, isSelected);
             });
         } else {
-            outList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Nenhuma saída encontrada.</div>`;
+            outList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Nenhum dispositivo encontrado.</div>`;
         }
 
         if (isReady && WebMidi.inputs.length > 0) {
@@ -45,7 +44,7 @@ const MidiConfig = {
                 inList.innerHTML += this._renderItem('in', device, isSelected);
             });
         } else {
-            inList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Nenhuma entrada encontrada.</div>`;
+            inList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Verifique a conexão USB.</div>`;
         }
     },
 
@@ -55,7 +54,7 @@ const MidiConfig = {
                  style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:rgba(255,255,255,0.05); margin-bottom:5px; border-radius:8px; cursor:pointer;">
                 <div style="display:flex; flex-direction:column; pointer-events:none;">
                     <span style="font-size:14px; font-weight:500; color:white;">${device.name}</span>
-                    <small style="opacity:0.5; font-size:10px; color:white;">${device.manufacturer || 'MIDI Device'}</small>
+                    <small style="opacity:0.5; font-size:10px; color:white;">${device.manufacturer || 'Roland / USB'}</small>
                 </div>
                 <div class="radio-circle ${isSelected ? 'selected' : ''}"></div>
             </div>`;
@@ -63,24 +62,26 @@ const MidiConfig = {
 
     async scanUSB(e) {
         const btn = e.target;
-        btn.innerText = "Solicitando...";
+        btn.innerText = "Autorizando...";
         
         try {
-            // FORÇA O NAVEGADOR A PEDIR PERMISSÃO AO USUÁRIO
+            // COMANDO CHAVE: Isso força o Chrome a perguntar "Permitir MIDI?"
             if (navigator.requestMIDIAccess) {
                 await navigator.requestMIDIAccess({ sysex: true });
+                console.log("Acesso MIDI autorizado via API nativa.");
             }
             
-            // Reinicia o motor para garantir que o WebMidi.js veja o que a API acabou de liberar
+            // Reinicia o motor MIDI para capturar o XPS-10
             await MidiEngine.start();
             
             setTimeout(() => {
                 this.updateDeviceLists();
                 btn.innerText = "Detectar USB";
-            }, 1000);
+            }, 800);
         } catch (err) {
-            console.error("Permissão MIDI negada pelo usuário ou navegador.");
-            btn.innerText = "Erro Permissão";
+            console.error("Erro ao solicitar acesso MIDI:", err);
+            alert("O navegador negou o acesso MIDI. Verifique as permissões de site.");
+            btn.innerText = "Erro!";
         }
     },
 
