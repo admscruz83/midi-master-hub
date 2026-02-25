@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>MIDI Master Hub</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#6750a4">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
     <link rel="stylesheet" href="css/main.css">
     <style>
         /* Estilos específicos para a lista de dispositivos dentro da Settings Page */
@@ -250,7 +256,7 @@
         save();
     }
 
-    // CORREÇÃO: Inicializa os pads e o motor MIDI ao carregar a página
+    // Inicializa os pads e o motor MIDI ao carregar a página
     document.addEventListener('DOMContentLoaded', () => {
         renderPads();
         if (typeof MidiEngine !== 'undefined') {
