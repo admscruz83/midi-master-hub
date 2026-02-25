@@ -1,5 +1,5 @@
 /**
- * MIDI Config - Bridge de Hardware
+ * MIDI Config - Refresh de Dispositivos
  */
 const MidiConfig = {
     renderDeviceList() {
@@ -35,7 +35,7 @@ const MidiConfig = {
                 outList.innerHTML += this._renderItem('out', dev, isSel);
             });
         } else {
-            outList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Nenhum dispositivo de saída.</div>`;
+            outList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Nenhum dispositivo encontrado.</div>`;
         }
 
         if (isReady && WebMidi.inputs.length > 0) {
@@ -44,7 +44,7 @@ const MidiConfig = {
                 inList.innerHTML += this._renderItem('in', dev, isSel);
             });
         } else {
-            inList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Nenhum dispositivo de entrada.</div>`;
+            inList.innerHTML = `<div style="opacity:0.5; font-size:12px; padding:10px; color:white;">Ligue o XPS-10 via OTG.</div>`;
         }
     },
 
@@ -53,8 +53,8 @@ const MidiConfig = {
             <div class="menu-item no-arrow" onclick="MidiConfig.applySelection('${type}', '${device.id}')" 
                  style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:rgba(255,255,255,0.05); margin-bottom:5px; border-radius:8px; cursor:pointer;">
                 <div style="display:flex; flex-direction:column; pointer-events:none;">
-                    <span style="font-size:14px; font-weight:500; color:white;">${device.name}</span>
-                    <small style="opacity:0.5; font-size:10px; color:white;">${device.manufacturer || 'MIDI Device'}</small>
+                    <span style="font-size:14px; font-weight:500; color:white;">${device.name || 'Dispositivo USB'}</span>
+                    <small style="opacity:0.5; font-size:10px; color:white;">${device.manufacturer || 'Roland'}</small>
                 </div>
                 <div class="radio-circle ${isSelected ? 'selected' : ''}"></div>
             </div>`;
@@ -65,21 +65,20 @@ const MidiConfig = {
         btn.innerText = "Autorizando...";
         
         try {
-            // PASSO 1: Força o diálogo de permissão nativo do Chrome
+            // Força a API nativa a acordar
             if (navigator.requestMIDIAccess) {
                 await navigator.requestMIDIAccess({ sysex: true });
             }
             
-            // PASSO 2: Inicia o WebMidi.js
+            // Reinicia o motor
             await MidiEngine.start();
             
-            // PASSO 3: Atualiza a interface
+            // Dá um tempo para o hardware responder e reconstrói a lista
             setTimeout(() => {
                 this.updateDeviceLists();
                 btn.innerText = "Detectar USB";
-            }, 500);
+            }, 800);
         } catch (err) {
-            alert("Acesso MIDI negado. Vá nas configurações do Chrome e permita o acesso MIDI para este site.");
             btn.innerText = "Erro!";
         }
     },
